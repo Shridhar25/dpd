@@ -1,0 +1,251 @@
+Server:
+
+import java.rmi.*;
+import java.rmi.server.*;
+import java.net.MalformedURLException;
+import java.sql.*;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Scanner;
+import java.util.concurrent.TimeUnit;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+
+public class MyRMIServerImpl extends UnicastRemoteObject implements MyRMIInterface {
+    int currentSize = 0, prepareRepliesReceived = 0;
+    ArrayList<String> participantIds = new ArrayList<String>();
+    ArrayList<String> notReadyparticipantsIDs = new ArrayList<String>();
+    ArrayList<String> acknowledgementIDs = new ArrayList<String>();
+    String decision = "NONE";
+    boolean sendPrepare, allReady = true, sendDecision;
+
+    public MyRMIServerImpl() throws RemoteException {
+        System.out.println("Creating Server Object");
+    }
+
+    // define remote methods for clients
+
+    public void addParticipant(String id) throws RemoteException {
+        System.out.println("\nClient " + id + " has joined");
+        this.participantIds.add(id);
+    }
+
+    public void respondToPrepareMsg(String reply, String id) throws RemoteException {
+        if (reply.equals("READY")) {
+            System.out.println("\nClient " + id + " has sent READY Reply");
+        } else {
+            System.out.println("\nClient " + id + " has sent ABORT Reply");
+            this.notReadyparticipantsIDs.add(id);
+            this.allReady = this.allReady && false;
+        }
+        this.prepareRepliesReceived++;
+
+    }
+
+    public String receivePrepareMsg() throws RemoteException {
+        if (this.sendPrepare)
+            return "PREPARE";
+        else
+            return "OTHER";
+    }
+
+    public String receiveDecisionMsg() throws RemoteException {
+        if (this.sendDecision)
+            return this.decision;
+        else
+            return "OTHER";
+    }
+
+    public void sendAcknowledgement(String id) throws RemoteException {
+        System.out.println("\nClient " + id + " has sent Acknowledgement...");
+        this.acknowledgementIDs.add(id);
+    }
+
+    public static void main(String args[]) {
+
+        try {
+            MyRMIServerImpl myserver = new MyRMIServerImpl();
+            Naming.rebind("dpd", myserver);
+            System.out.print("Server Ready");
+            
+            Scanner sc = new Scanner(System.in);
+            System.out.print("\nEnter number of participants required to begin transaction: ");
+            int maxParticipants = sc.nextInt();
+            System.out.println("\nWaiting for " + maxParticipants + " participants to join...");
+            while (myserver.participantIds.size() != maxParticipants) {
+                TimeUnit.SECONDS.sleep(2);
+                int remaining = maxParticipants - myserver.participantIds.size();
+                System.out.println(
+                        "Waiting for " + remaining + (remaining > 1 ? " more participants" : " more participant") + " to join... ");
+            }
+
+            System.out.println("\nAll " + maxParticipants + " participants have joined...begining transaction...\n");
+
+            System.out.println("\n--PHASE-I--\n");
+            System.out.println("Sending PREPARE message to all participants...");
+
+            try (
+                    FileWriter fw = new FileWriter("log.txt", true);
+                    BufferedWriter bw = new BufferedWriter(fw);
+                    PrintWriter p_out = new PrintWriter(bw)) {
+                p_out.println("PREPARE");
+                System.out.println("\nWrote PREPARE to the log file.");
+                myserver.sendPrepare = true;
+            } catch (IOException e) {
+                System.out.println("An error occurred.");
+                e.printStackTrace();
+            }
+
+            System.out.println("\nWaiting for replies from participants...");
+            while (myserver.prepareRepliesReceived != maxParticipants) {
+                TimeUnit.SECONDS.sleep(2);
+                int remaining = maxParticipants - myserver.prepareRepliesReceived;
+                System.out.println(
+                        "Waiting for " + remaining + (remaining > 1 ? " more participants" : " more participant") + " to reply ");
+            }
+
+            System.out.println("All " + maxParticipants + " Participants have replied...\n");
+
+            System.out.println("\n--PHASE-II--\n");
+
+            if (myserver.allReady) {
+                System.out.println("All participants have sent READY Message...");
+                System.out.println("Sending COMMIT Message to All Participants");
+                myserver.decision = "GLOBAL_COMMIT";
+            } else {
+                System.out.println("Participants " + String.join(", ", myserver.notReadyparticipantsIDs) + " have sent ABORT or are timeout...");
+                System.out.println("Sending ABORT Message to All Participants");
+                myserver.decision = "GLOBAL_ABORT";
+            }
+
+            try (
+                    FileWriter fw = new FileWriter("log.txt", true);
+                    BufferedWriter bw = new BufferedWriter(fw);
+                    PrintWriter p_out = new PrintWriter(bw)) {
+                p_out.println(myserver.decision);
+                System.out.println("\nWrote " + myserver.decision + " to the log file");
+                myserver.sendDecision = true;
+            } catch (IOException e) {
+                System.out.println("Error!");
+                e.printStackTrace();
+            }
+
+            System.out.println("\nWaiting for Acknowledgements from Participants");
+            while (myserver.acknowledgementIDs.size() != maxParticipants) {
+                TimeUnit.SECONDS.sleep(2);
+                int remaining = maxParticipants - myserver.acknowledgementIDs.size();
+                System.out.println(
+                        "Waiting for " + remaining + (remaining > 1 ? " More Participants" : " More Participant")
+                                + " to Acknowledge");
+            }
+
+            System.out.println("\nAll " + maxParticipants + " Participants have Acknowledged\n");
+
+            if (myserver.decision.equals("GLOBAL_COMMIT")) {
+                System.out.println("\nTransaction Successfully COMITTED\n");
+            } else {
+                System.out.println("\nTransaction Successfully ABORTED\n");
+            }
+        } catch (Exception ex) {
+            System.out.println("Error " + ex);
+        }
+    }
+}
+
+Interface:
+
+import java.rmi.*;
+
+public interface MyRMIInterface extends Remote {
+
+    public void addParticipant(String id) throws RemoteException;
+    public void respondToPrepareMsg(String reply, String id) throws RemoteException;
+    public String receivePrepareMsg() throws RemoteException;
+    public String receiveDecisionMsg() throws RemoteException;
+    public void sendAcknowledgement(String id) throws RemoteException;
+}
+
+Client:
+
+import java.rmi.*;
+import java.text.SimpleDateFormat;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.net.MalformedURLException;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
+
+public class MyRMIClient {
+    public static void main(String args[]) {
+        Scanner sc = new Scanner(System.in);
+
+        try {
+            MyRMIInterface obj = (MyRMIInterface) Naming.lookup("dpd");
+            String timeStampID = new SimpleDateFormat("yyyy.MM.dd.HH.mm.ss").format(new java.util.Date());
+            obj.addParticipant(timeStampID);
+            System.out.println("ID for this client: " + timeStampID + "\n--PHASE-I--\n");
+
+            String serverMsg, clientReply, action;
+            System.out.print("Waiting for Server");
+            while (true) {
+                serverMsg = obj.receivePrepareMsg();
+                TimeUnit.SECONDS.sleep(1);
+                System.out.print(".");
+                if (serverMsg.equals("PREPARE")) {
+                    System.out.print("\nServer has sent PREPARE message. (READY or ABORT) ?: ");
+                    clientReply = sc.nextLine();
+                    obj.respondToPrepareMsg(clientReply, timeStampID);
+
+                    try (
+                            FileWriter fw = new FileWriter("log" + timeStampID + ".txt", true);
+                            BufferedWriter bw = new BufferedWriter(fw);
+                            PrintWriter p_out = new PrintWriter(bw)) {
+                        p_out.println(clientReply);
+                        System.out.println("\nWrote " + clientReply + " to the log file.");
+                    } catch (IOException e) {
+                        System.out.println("An error occurred.");
+                        e.printStackTrace();
+                    }
+                    break;
+                }
+            }
+
+            System.out.println("\n--PHASE-II--\n");
+            System.out.print("Waiting for Server");
+            while (true) {
+                serverMsg = obj.receiveDecisionMsg();
+                TimeUnit.SECONDS.sleep(1);
+                System.out.print(".");
+                if (serverMsg.equals("GLOBAL_COMMIT") || serverMsg.equals("GLOBAL_ABORT")) {
+                    if (serverMsg.equals("GLOBAL_COMMIT")) {
+                        action = "COMMIT";
+                    } else {
+                        action = "ABORT";
+                    }
+                    System.out.print("\nServer has sent Command: " + action);
+
+                    try (
+                            FileWriter fw = new FileWriter("log" + timeStampID + ".txt", true);
+                            BufferedWriter bw = new BufferedWriter(fw);
+                            PrintWriter p_out = new PrintWriter(bw)) {
+                        p_out.println(action);
+                        System.out.println("\nWrote " + action + " to the log file.");
+                        obj.sendAcknowledgement(timeStampID);
+                    } catch (IOException e) {
+                        System.out.println("Error!");
+                        e.printStackTrace();
+                    }
+                    break;
+                }
+            }
+
+            System.out.println("\n\nSub-transaction Successfully " + action + "ED !!");
+        } catch (Exception ex) {
+            System.out.println("Error " + ex);
+        }
+    }
+}

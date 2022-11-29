@@ -1,0 +1,77 @@
+RMIInterface
+
+import java.rmi.*;
+public interface MyRMIInterface extends Remote {
+public int returnSquare(int number) throws RemoteException;
+public float returnDiscount(float purchaseAmount) throws RemoteException;
+}
+
+
+RMIServer
+
+import java.rmi.*;
+import java.rmi.server.*;
+import java.net.MalformedURLException;
+import java.sql.*;
+
+public class MyRMIServerImpl extends UnicastRemoteObject implements MyRMIInterface {
+    public MyRMIServerImpl() throws RemoteException {
+    System.out.println("Creating server Object ...");
+    }
+
+    //define remote methods for clients
+    public int returnSquare(int number) throws RemoteException {
+    int square = number * number;
+    return(square);
+    }
+
+    public float returnDiscount(float purchaseAmount) throws RemoteException {
+        float discount = purchaseAmount / 4 ;
+        return(discount);
+    }
+
+
+    public static void main(String args[]) {
+        try {
+        //create a server object
+        MyRMIServerImpl myserver = new MyRMIServerImpl();
+                    
+        Naming.rebind("Shridhar",myserver);
+        System.out.println("Server Ready...");
+        }
+        catch(Exception ex) {
+            System.out.println("Error " +ex);
+        }
+    } 
+}
+
+RMICient
+
+import java.rmi.*;
+import java.net.MalformedURLException;
+import java.util.*;
+
+public class MyRMIClient {
+    public static void main(String args[]) {
+        int num=0;		
+        float pa=0;
+        Scanner sc=new Scanner(System.in);
+
+        try {
+            MyRMIInterface obj =(MyRMIInterface)Naming.lookup("Shridhar");
+            System.out.print("Enter Number: ");
+            num = sc.nextInt();
+            int square = obj.returnSquare(num);
+            System.out.println("Square of "+num+" is "+square);
+
+            System.out.print("\nEnter purchase amount: ");
+            pa=sc.nextFloat();
+            float discount = obj.returnDiscount(pa);
+            System.out.println("After 25%, Discounted Price: "+discount);
+        }
+        catch(Exception ex) {
+            System.out.println("Error " +ex);
+        }	
+    }
+}
+
